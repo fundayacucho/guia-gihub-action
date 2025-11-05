@@ -1,39 +1,64 @@
-# 🚀 Guía para configurar GitHub Actions para despliegue automático
+# 🚀 Guía completa para configurar GitHub Actions con despliegue automático en CentOS
 
-Esta guía te ayudará a configurar un workflow de GitHub Actions que se activa al hacer `push` a una rama específica (por ejemplo, `main`) y ejecuta un script de despliegue en tu servidor vía SSH.
+Esta guía te permite configurar un workflow de GitHub Actions que se activa al hacer `push` a una rama (ej. `main`) y ejecuta un script en tu servidor CentOS vía SSH.
 
 ---
 
 ## 🧱 Requisitos previos
 
-1. **Servidor con acceso SSH** (CentOS, AlmaLinux, Ubuntu, etc.)
-2. **Usuario de despliegue** en el servidor (ej. `deployuser`)
-3. **Llave SSH configurada**:
-   - Llave privada guardada como secreto en GitHub
-   - Llave pública agregada a `~/.ssh/authorized_keys` del usuario en el servidor
-4. **Script de despliegue** en el servidor (ej. `/home/deployuser/scripts/deploy.sh`)
-5. **Permisos correctos** en `.ssh`, `authorized_keys`, y el script
+- Servidor CentOS con acceso SSH
+- Usuario `deployuser` con permisos limitados
+- Llave SSH configurada entre GitHub y el servidor
+- Script de despliegue (`deploy.sh`) en el servidor
+- Permisos correctos en carpetas, llaves y SELinux
 
 ---
 
-## 🔐 Paso 1: Crear y registrar la llave SSH
-
-### En tu máquina local o servidor:
+## 👤 Paso 1: Crear el usuario de despliegue
 
 ```bash
+# como root
+useradd -m -s /bin/bash deployuser
+passwd -l deployuser  # opcional: deshabilitar contraseña
+usermod -aG wheel deployuser  # opcional: acceso sudo limitado
+🔐 Paso 2: Configurar la llave SSH
+Generar llave (local o en el servidor)
+bash
 ssh-keygen -t ed25519 -C "github-actions-deploy"
 Llave privada: ~/.ssh/id_ed25519
 
 Llave pública: ~/.ssh/id_ed25519.pub
 
-En el servidor:
+Registrar la llave pública en el servidor
 bash
-mkdir -p ~/.ssh
-cat id_ed25519.pub >> ~/.ssh/authorized_keys
-chmod 700 ~/.ssh
-chmod 600 ~/.ssh/authorized_keys
-chown -R deployuser:deployuser ~/.ssh
-En GitHub:
+mkdir -p /home/deployuser/.ssh
+cat id_ed25519.pub >> /home/deployuser/.ssh/authorized_keys
+chown -R deployuser:deployuser /home/deployuser/.ssh
+chmod 700 /home/deployuser/.ssh
+chmod 600 /home/deployuser/.ssh/authorized_keys
+Restaurar contexto SELinux
+bash
+restorecon -Rv /home/deployuser/.ssh
+📁 Paso 3: Crear estructura de carpetas
+bash
+mkdir -p /home/deployuser/scripts
+mkdir -p /home/deployuser/repos
+mkdir -p /home/deployuser/build_backups
+chown -R deployuser:deployuser /home/deployuser
+chmod 755 /home/deployuser
+chmod 700 /home/deployuser/.ssh
+chmod 750 /home/deployuser/scripts
+chmod 755 /home/deployuser/repos
+chmod 755 /home/deployuser/build_backups
+🧾 Paso 4: Crear el script deploy.sh
+Guarda el script en /home/deployuser/scripts/deploy.sh y hazlo ejecutable:
+
+bash
+chmod +x /home/deployuser/scripts/deploy.sh
+chown deployuser:deployuser /home/deployuser/scripts/deploy.sh
+🌐 Paso 5: Configurar GitHub Secrets
+En tu repositorio GitHub:
+
 Ve a Settings → Secrets → Actions
 
 Crea un nuevo secreto:
@@ -42,11 +67,9 @@ Name: VPS_SSH_PRIVATE_KEY
 
 Value: contenido completo de id_ed25519
 
-⚙️ Paso 2: Crear el archivo del workflow
-Crea el archivo .github/workflows/deploy.yml en tu repositorio:
-
+⚙️ Paso 6: Crear el workflow .github/workflows/deploy.yml
 yaml
-name: Deploy to VPS
+name: Deploy to CentOS VPS
 
 on:
   push:
@@ -74,20 +97,20 @@ jobs:
       - name: Run deploy script on VPS
         run: |
           ssh deployuser@200.6.157.90 "bash -l -c '/home/deployuser/scripts/deploy.sh'"
-🧪 Paso 3: Probar el workflow
-Haz git push a la rama main
+🧪 Paso 7: Verificar conexión SSH
+bash
+# desde tu máquina local
+ssh -i ~/.ssh/id_ed25519 deployuser@200.6.157.90
+🛡️ Paso 8: Ajustes de SELinux y Apache/Nginx
+Si usas /home/fundaya/becarios/public_html como DocumentRoot:
 
-Ve a la pestaña Actions en GitHub
+bash
+dnf install -y policycoreutils-python-utils
 
-Verifica que el workflow se ejecuta correctamente
-
-Revisa los logs en el servidor (ej. /home/deployuser/deploy.log)
-
-🧠 Consejos adicionales
-Usa npx o rutas absolutas en el script para evitar conflictos de versiones de Node/npm
-
-Asegura que el script tenga permisos de ejecución: chmod +x deploy.sh
-
-Puedes agregar más secretos si tu script necesita tokens, variables, etc.
-
-Si usas SELinux, aplica restorecon y semanage fcontext para que Apache/Nginx pueda leer los archivos
+semanage fcontext -a -t httpd_sys_content_t "/home/fundaya/becarios/public_html(/.*)?"
+restorecon -Rv /home/fundaya/becarios/public_html
+🔥 Paso 9: Abrir puertos en el firewall
+bash
+firewall-cmd --add-service=http --permanent
+firewall-cmd --add-service=https --permanent
+firewall-cmd --reload
